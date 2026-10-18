@@ -788,12 +788,6 @@ impl LyricsFlipNFT {
         bump_persistent(env, &key);
     }
 
-    fn assert_live_until(env: &Env, live_until_ledger: u32) {
-        if live_until_ledger < env.ledger().sequence() {
-            panic_with_error!(env, Error::InvalidLiveUntilLedger);
-        }
-    }
-
     // -------------------------------------------------------------------------
     // LF-170 – owner index helpers
     //

@@ -177,9 +177,9 @@ fn ascii_lower_string(env: &Env, value: &String) -> String {
     let bytes = value.to_bytes();
     let mut buf = [0u8; 256];
     let len = bytes.len().min(256) as usize;
-    for i in 0..len {
+    for (i, byte) in buf.iter_mut().take(len).enumerate() {
         let b = bytes.get(i as u32).unwrap();
-        buf[i] = if b >= b'A' && b <= b'Z' { b + 32 } else { b };
+        *byte = if b.is_ascii_uppercase() { b + 32 } else { b };
     }
     String::from_bytes(env, &buf[..len])
 }
@@ -188,7 +188,7 @@ fn ascii_lower_bytes(env: &Env, value: &String) -> Bytes {
     let bytes = value.to_bytes();
     let mut out = Bytes::new(env);
     for b in bytes.iter() {
-        if b >= b'A' && b <= b'Z' {
+        if b.is_ascii_uppercase() {
             out.push_back(b + 32)
         } else {
             out.push_back(b)
@@ -321,7 +321,7 @@ impl LyricsFlip {
             .set(&DataKey::Round(round_id), &round);
 
         let winners = Self::determine_round_winners(&env, round_id);
-        if winners.len() > 0 {
+        if !winners.is_empty() {
             for player in Self::read_round_players(&env, round_id).iter() {
                 let mut is_winner = false;
                 for winner in winners.iter() {
@@ -475,7 +475,7 @@ impl LyricsFlip {
                     .unwrap_or(false);
                 if round.is_started && !finalized {
                     let cards = Self::read_round_cards(&env, round_id);
-                    if cards.contains(&card_id) {
+                    if cards.contains(card_id) {
                         panic_with_error!(env, Error::NotAuthorized);
                     }
                 }
@@ -634,7 +634,7 @@ impl LyricsFlip {
                 panic_with_error!(env, Error::InvalidDecade);
             }
         }
-        Self::require_not_paused(&env);
+        Self::require_not_paused(env);
 
         let amount = Self::get_cards_per_round((*env).clone()) as u64;
         let source = filter.genre.map(Index::Genre).unwrap_or(Index::All);
@@ -709,22 +709,22 @@ impl LyricsFlip {
             is_cancelled: false,
         };
 
-        let mut players: Vec<Address> = Vec::new(&env);
+        let mut players: Vec<Address> = Vec::new(env);
         players.push_back(caller.clone());
         env.storage()
             .persistent()
             .set(&DataKey::RoundPlayers(round_id), &players);
-        bump_persistent(&env, &DataKey::RoundPlayers(round_id));
+        bump_persistent(env, &DataKey::RoundPlayers(round_id));
 
         env.storage()
             .persistent()
             .set(&DataKey::RoundCards(round_id), &cards);
-        bump_persistent(&env, &DataKey::RoundCards(round_id));
+        bump_persistent(env, &DataKey::RoundCards(round_id));
 
         env.storage()
             .persistent()
             .set(&DataKey::Round(round_id), &round);
-        bump_persistent(&env, &DataKey::Round(round_id));
+        bump_persistent(env, &DataKey::Round(round_id));
 
         env.storage().persistent().set(
             &DataKey::RoundCreatedAt(round_id),
@@ -734,7 +734,7 @@ impl LyricsFlip {
         let mut open = Self::read_open_rounds(env);
         open.push_back(round_id);
         env.storage().persistent().set(&DataKey::OpenRounds, &open);
-        bump_persistent(&env, &DataKey::OpenRounds);
+        bump_persistent(env, &DataKey::OpenRounds);
 
         bump_instance(env);
 
@@ -1583,7 +1583,7 @@ impl LyricsFlip {
 
         let shuffled_all = Self::get_random_numbers(env, seed + 1, cards_count, cards_count, false);
         for id in shuffled_all.iter() {
-            if !genre_ids.contains(&id) {
+            if !genre_ids.contains(id) {
                 candidates.push_back(id);
             }
         }
@@ -1751,7 +1751,7 @@ impl LyricsFlip {
             artist: 0,
             year: 0,
         };
-        for index in Index::of(&env, &card).iter() {
+        for index in Index::of(env, &card).iter() {
             *index.pos(&mut pos) = Self::index_push(env, index, card_id);
         }
         env.storage()
@@ -1921,7 +1921,7 @@ impl LyricsFlip {
 
         for player in players.iter() {
             let score = scores.get(player.clone()).unwrap_or(0u64);
-            if score == 0 && max_score == 0 && winners.len() == 0 {
+            if score == 0 && max_score == 0 && winners.is_empty() {
                 continue;
             }
 

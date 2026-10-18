@@ -29,16 +29,14 @@ describe('SEP-10 replay protection', () => {
   });
 
   it('rejects a replay against a second instance sharing the same database', async () => {
-    // Both harnesses share DATABASE_URL but get distinct schemas by default.
-    // To exercise "shared database", boot instance B on the SAME schema as A.
-    const a = await createHarness();
-    const schema = await a.dataSource.query(
-      `SELECT current_schema() AS s`,
-    ).then((rows: any[]) => rows[0].s as string);
-
-    const b = await createHarness({}, { scripted: false });
-    // Swap B's search_path to A's schema so they share tables.
-    await b.dataSource.query(`SET search_path TO "${schema}"`);
+    // Use one server signing key and one database schema for both instances.
+    const signingSecret = Keypair.random().secret();
+    const sep10 = { signingSecret, homeDomain: "toolkit.test", networkPassphrase: NETWORK_PASSPHRASE };
+    const a = await createHarness({ sep10 });
+    const schema = await a.dataSource
+      .query(`SELECT current_schema() AS s`)
+      .then((rows: any[]) => rows[0].s as string);
+    const b = await createHarness({ sep10 }, { scripted: false, schema });
 
     try {
       const svcA = a.app.get(Sep10Service);
@@ -63,7 +61,9 @@ describe('SEP-10 replay protection', () => {
   });
 
   it('a process restart does not allow a redeemed challenge to be reused', async () => {
-    const first = await createHarness();
+    const signingSecret = Keypair.random().secret();
+    const sep10 = { signingSecret, homeDomain: "toolkit.test", networkPassphrase: NETWORK_PASSPHRASE };
+    const first = await createHarness({ sep10 });
     const schema = await first.dataSource
       .query(`SELECT current_schema() AS s`)
       .then((rows: any[]) => rows[0].s as string);
@@ -78,8 +78,7 @@ describe('SEP-10 replay protection', () => {
 
     // Don't drop the schema — reuse it after "restart".
     // (Detach by not calling first.close(); instead, boot a fresh instance.)
-    const second = await createHarness({}, { scripted: false });
-    await second.dataSource.query(`SET search_path TO "${schema}"`);
+    const second = await createHarness({ sep10 }, { scripted: false, schema });
     const svc2 = second.app.get(Sep10Service);
 
     try {

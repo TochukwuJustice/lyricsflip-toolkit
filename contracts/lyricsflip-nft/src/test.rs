@@ -307,7 +307,7 @@ fn approve_panics_with_non_transferable() {
 
 #[test]
 fn approve_for_all_panics_with_non_transferable() {
-    let (env, client, _owner, minter) = setup();
+    let (env, client, _owner, _minter) = setup();
     let alice = Address::generate(&env);
     let operator = Address::generate(&env);
 
@@ -353,9 +353,9 @@ fn tokens_of_owner_returns_minted_tokens() {
 
     let tokens = client.tokens_of_owner(&alice, &0, &50);
     assert_eq!(tokens.len(), 3);
-    assert!(tokens.contains(&t1));
-    assert!(tokens.contains(&t2));
-    assert!(tokens.contains(&t3));
+    assert!(tokens.contains(t1));
+    assert!(tokens.contains(t2));
+    assert!(tokens.contains(t3));
 }
 
 #[test]
@@ -439,11 +439,11 @@ fn multiple_owners_have_independent_indexes() {
     let bob_tokens = client.tokens_of_owner(&bob, &0, &50);
 
     assert_eq!(alice_tokens.len(), 2);
-    assert!(alice_tokens.contains(&t1));
-    assert!(alice_tokens.contains(&t3));
+    assert!(alice_tokens.contains(t1));
+    assert!(alice_tokens.contains(t3));
 
     assert_eq!(bob_tokens.len(), 1);
-    assert!(bob_tokens.contains(&t2));
+    assert!(bob_tokens.contains(t2));
 }
 
 // ---------------------------------------------------------------------------
@@ -535,7 +535,7 @@ fn unpause_restores_mint() {
 
 #[test]
 fn pause_and_unpause_are_owner_only() {
-    let (env, client, _owner, minter) = setup();
+    let (_env, client, _owner, minter) = setup();
 
     assert_eq!(client.try_pause(&minter), Err(Ok(Error::NotOwner.into())));
     client.pause(&_owner);
@@ -681,7 +681,7 @@ fn upgrade_and_migrate_populated_contract_v1_to_v2() {
     assert_eq!(v2_client.version(), 2);
     // Schema version remains 1 before migration
     assert_eq!(v2_client.schema_version(), 1);
-    assert_eq!(v2_client.migrated_data(), false);
+    assert!(!v2_client.migrated_data());
 
     // Non-owner cannot migrate
     let unauthorized = Address::generate(&env);
@@ -704,13 +704,13 @@ fn upgrade_and_migrate_populated_contract_v1_to_v2() {
 
     // Verify migration effects
     assert_eq!(v2_client.schema_version(), 2);
-    assert_eq!(v2_client.migrated_data(), true);
+    assert!(v2_client.migrated_data());
     assert_eq!(v2_client.migration_count(), 1);
 
     // 4. Calling migrate a second time is an idempotent no-op
     v2_client.migrate(&owner);
     assert_eq!(v2_client.schema_version(), 2);
-    assert_eq!(v2_client.migrated_data(), true);
+    assert!(v2_client.migrated_data());
     assert_eq!(
         v2_client.migration_count(),
         1,

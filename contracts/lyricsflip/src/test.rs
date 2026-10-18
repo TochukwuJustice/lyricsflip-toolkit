@@ -18,7 +18,6 @@ use crate::{
     MAX_CARDS_PER_BATCH, MAX_LYRICS_LEN, MAX_PAGE_LIMIT, MAX_ROUND_PLAYERS,
 };
 use soroban_sdk::{
-    events::Event as _,
     testutils::{Address as _, ContractEvents, Events, Ledger},
     xdr, Address, Env, Event, Map, String, Vec,
 };
@@ -542,8 +541,6 @@ fn build_question_card_year_distractors_are_close_to_correct_year() {
     ];
     for opt in options.iter() {
         // Parse the year string.
-        let bytes = std::string::ToString::to_string(opt);
-        let parsed: i64 = bytes.parse().expect("year option should be a number");
         // Parse the year string without std (the contract stores years as
         // plain decimal `String`s via `u64_to_string`).
         let parsed = parse_year_u64(opt) as i64;
@@ -916,6 +913,14 @@ fn finalize_round_e2e_single_winner_updates_stats_and_scores() {
         .len();
     let second_attempt = client.try_finalize_round(&owner, &round_id);
     assert!(second_attempt.is_err());
+    assert_eq!(
+        env.events()
+            .all()
+            .filter_by_contract(&client.address)
+            .events()
+            .len(),
+        event_count_before_second_finalize
+    );
 }
 
 #[test]
@@ -2069,7 +2074,7 @@ fn pause_blocks_create_round_join_round_and_claim_reward() {
 
 #[test]
 fn pause_blocks_claim_milestone_entrypoints() {
-    let (env, client, owner) = setup();
+    let (_env, client, owner) = setup();
     client.pause(&owner);
 
     assert_eq!(
@@ -2245,7 +2250,7 @@ fn upgrade_and_migrate_populated_contract_v1_to_v2() {
     assert_eq!(v2_client.version(), 2);
     // Schema version remains 1 before migration
     assert_eq!(v2_client.schema_version(), 1);
-    assert_eq!(v2_client.migrated_data(), false);
+    assert!(!v2_client.migrated_data());
 
     // Non-owner cannot migrate
     let unauthorized = Address::generate(&env);
@@ -2268,13 +2273,13 @@ fn upgrade_and_migrate_populated_contract_v1_to_v2() {
 
     // Verify migration effects
     assert_eq!(v2_client.schema_version(), 2);
-    assert_eq!(v2_client.migrated_data(), true);
+    assert!(v2_client.migrated_data());
     assert_eq!(v2_client.migration_count(), 1);
 
     // 4. Calling migrate a second time is an idempotent no-op
     v2_client.migrate(&owner);
     assert_eq!(v2_client.schema_version(), 2);
-    assert_eq!(v2_client.migrated_data(), true);
+    assert!(v2_client.migrated_data());
     assert_eq!(
         v2_client.migration_count(),
         1,
@@ -3044,6 +3049,7 @@ fn seeded_card_removals_preserve_genre_indexes() {
     }
 }
 
+#[test]
 fn lf161_rejects_leading_or_trailing_whitespace() {
     let (env, client, owner) = setup();
     let base = sample_card(&env, Genre::Pop, "Artist", "Title", 2000);
@@ -3118,7 +3124,7 @@ fn parse_all_year_options(q: &crate::QuestionCard) -> std::vec::Vec<u64> {
         q.option_three.clone(),
         q.option_four.clone(),
     ];
-    opts.iter().map(|o| parse_year_u64(o)).collect()
+    opts.iter().map(parse_year_u64).collect()
 }
 
 #[test]

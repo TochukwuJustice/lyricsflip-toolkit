@@ -104,10 +104,13 @@ export async function createHarness(
   { scripted = true, schema: providedSchema }: { scripted?: boolean; schema?: string } = {},
 ): Promise<Harness> {
   const schema = providedSchema ?? `pvp_test_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
-  const admin = new Client({ connectionString: DATABASE_URL });
-  await admin.connect();
-  await admin.query(`CREATE SCHEMA "${schema}"`);
-  await admin.end();
+  const ownsSchema = providedSchema === undefined;
+  if (ownsSchema) {
+    const admin = new Client({ connectionString: DATABASE_URL });
+    await admin.connect();
+    await admin.query(`CREATE SCHEMA "${schema}"`);
+    await admin.end();
+  }
 
   const events: PvpEvent[] = [];
   const sep10Keypair = Keypair.random();
@@ -158,10 +161,12 @@ export async function createHarness(
     sep10Keypair,
     async close() {
       await app.close();
-      const cleanup = new Client({ connectionString: DATABASE_URL });
-      await cleanup.connect();
-      await cleanup.query(`DROP SCHEMA "${schema}" CASCADE`);
-      await cleanup.end();
+      if (ownsSchema) {
+        const cleanup = new Client({ connectionString: DATABASE_URL });
+        await cleanup.connect();
+        await cleanup.query(`DROP SCHEMA "${schema}" CASCADE`);
+        await cleanup.end();
+      }
     },
   };
 }
