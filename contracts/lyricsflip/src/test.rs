@@ -2183,7 +2183,7 @@ fn upgrade_keeps_state_and_changes_version() {
 
     let hash = env
         .deployer()
-        .upload_contract_wasm(include_bytes!("../../../fixtures/upgrade_v2.wasm").as_slice());
+        .upload_contract_wasm(include_bytes!("../../fixtures/upgrade_v2.wasm").as_slice());
     assert_eq!(
         client.try_upgrade(&other, &hash),
         Err(Ok(Error::NotAuthorized.into()))
@@ -2231,7 +2231,7 @@ fn upgrade_and_migrate_populated_contract_v1_to_v2() {
     // 1. Upgrade contract to v2
     let hash = env
         .deployer()
-        .upload_contract_wasm(include_bytes!("../../../fixtures/upgrade_v2.wasm").as_slice());
+        .upload_contract_wasm(include_bytes!("../../fixtures/upgrade_v2.wasm").as_slice());
     client.upgrade(&owner, &hash);
 
     // Verify ContractUpgraded event was emitted
