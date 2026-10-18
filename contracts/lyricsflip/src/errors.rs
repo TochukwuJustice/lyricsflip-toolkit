@@ -90,4 +90,3 @@ pub enum Error {
     /// always leave the contract.
     Paused = 40,
 }
-

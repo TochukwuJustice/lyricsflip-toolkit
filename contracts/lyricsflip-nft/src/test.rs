@@ -537,15 +537,9 @@ fn unpause_restores_mint() {
 fn pause_and_unpause_are_owner_only() {
     let (env, client, _owner, minter) = setup();
 
-    assert_eq!(
-        client.try_pause(&minter),
-        Err(Ok(Error::NotOwner.into()))
-    );
+    assert_eq!(client.try_pause(&minter), Err(Ok(Error::NotOwner.into())));
     client.pause(&_owner);
-    assert_eq!(
-        client.try_unpause(&minter),
-        Err(Ok(Error::NotOwner.into()))
-    );
+    assert_eq!(client.try_unpause(&minter), Err(Ok(Error::NotOwner.into())));
     assert!(client.is_paused());
 }
 
@@ -660,7 +654,9 @@ fn upgrade_and_migrate_populated_contract_v1_to_v2() {
 
     // Simulate a deployed pre-versioning instance, whose missing key reads as v1.
     env.as_contract(&client.address, || {
-        env.storage().instance().set(&crate::DataKey::SchemaVersion, &1u32);
+        env.storage()
+            .instance()
+            .set(&crate::DataKey::SchemaVersion, &1u32);
     });
 
     // 1. Upgrade contract to v2
@@ -715,7 +711,11 @@ fn upgrade_and_migrate_populated_contract_v1_to_v2() {
     v2_client.migrate(&owner);
     assert_eq!(v2_client.schema_version(), 2);
     assert_eq!(v2_client.migrated_data(), true);
-    assert_eq!(v2_client.migration_count(), 1, "migrate twice must be a no-op");
+    assert_eq!(
+        v2_client.migration_count(),
+        1,
+        "migrate twice must be a no-op"
+    );
 }
 
 // ---------------------------------------------------------------------------

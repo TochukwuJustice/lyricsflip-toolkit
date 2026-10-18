@@ -77,6 +77,9 @@ jobs:
 
       - run: npm ci
 
+      - name: Build SDK
+        run: npm run build -w @lyricsflip-toolkit/sdk
+
       - name: Wait for the network
         run: |
           for i in $(seq 1 60); do

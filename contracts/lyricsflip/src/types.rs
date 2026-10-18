@@ -138,20 +138,30 @@ impl TryFrom<&RoundFilter> for soroban_sdk::xdr::ScVal {
         use soroban_sdk::xdr::{ScMap, ScMapEntry, ScSymbol, ScVal};
         let mut entries = std::vec::Vec::new();
         if let Some(decade) = filter.decade {
-            let sym = ScSymbol("decade".try_into().map_err(|_| soroban_sdk::xdr::Error::Invalid)?);
+            let sym = ScSymbol(
+                "decade"
+                    .try_into()
+                    .map_err(|_| soroban_sdk::xdr::Error::Invalid)?,
+            );
             entries.push(ScMapEntry {
                 key: ScVal::Symbol(sym),
                 val: ScVal::U64(decade),
             });
         }
         if let Some(genre) = filter.genre {
-            let sym = ScSymbol("genre".try_into().map_err(|_| soroban_sdk::xdr::Error::Invalid)?);
+            let sym = ScSymbol(
+                "genre"
+                    .try_into()
+                    .map_err(|_| soroban_sdk::xdr::Error::Invalid)?,
+            );
             entries.push(ScMapEntry {
                 key: ScVal::Symbol(sym),
                 val: ScVal::U32(genre as u32),
             });
         }
-        let map_m = entries.try_into().map_err(|_| soroban_sdk::xdr::Error::Invalid)?;
+        let map_m = entries
+            .try_into()
+            .map_err(|_| soroban_sdk::xdr::Error::Invalid)?;
         Ok(ScVal::Map(Some(ScMap(map_m))))
     }
 }

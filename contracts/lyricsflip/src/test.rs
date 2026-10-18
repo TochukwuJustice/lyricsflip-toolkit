@@ -2212,7 +2212,9 @@ fn upgrade_and_migrate_populated_contract_v1_to_v2() {
 
     // Simulate a deployed pre-versioning instance, whose missing key reads as v1.
     env.as_contract(&client.address, || {
-        env.storage().instance().set(&crate::DataKey::SchemaVersion, &1u32);
+        env.storage()
+            .instance()
+            .set(&crate::DataKey::SchemaVersion, &1u32);
     });
 
     // Non-owner cannot call migrate.
@@ -2273,7 +2275,11 @@ fn upgrade_and_migrate_populated_contract_v1_to_v2() {
     v2_client.migrate(&owner);
     assert_eq!(v2_client.schema_version(), 2);
     assert_eq!(v2_client.migrated_data(), true);
-    assert_eq!(v2_client.migration_count(), 1, "migrate twice must be a no-op");
+    assert_eq!(
+        v2_client.migration_count(),
+        1,
+        "migrate twice must be a no-op"
+    );
 }
 
 #[test]
@@ -2546,17 +2552,29 @@ fn lf003_single_card_round_can_be_answered() {
     // Submitting an answer for the last (and only) card must not panic.
     env.ledger().set_timestamp(NOW + 10);
     let correct = client.submit_answer(&owner, &round_id, &Answer::Title(card.title.clone()));
-    assert!(correct, "answer to the only card in a 1-card round must be accepted");
+    assert!(
+        correct,
+        "answer to the only card in a 1-card round must be accepted"
+    );
 
     // Round is not yet completed â only finalize_round sets is_completed.
     let round = client.get_round(&round_id);
-    assert!(!round.is_completed, "round must not be completed until finalize_round is called");
+    assert!(
+        !round.is_completed,
+        "round must not be completed until finalize_round is called"
+    );
 
     // Finalize succeeds because the one card has been answered.
     client.finalize_round(&owner, &round_id);
     let round = client.get_round(&round_id);
-    assert!(round.is_completed, "round must be completed after finalize_round");
-    assert!(round.end_time > 0, "end_time must be set when the round completes");
+    assert!(
+        round.is_completed,
+        "round must be completed after finalize_round"
+    );
+    assert!(
+        round.end_time > 0,
+        "end_time must be set when the round completes"
+    );
 }
 
 /// cards_per_round = 3: answer to the 3rd card is accepted; round is marked
@@ -2627,7 +2645,10 @@ fn lf003_next_card_after_deck_exhausted_returns_no_more_cards() {
 
     // A third call must fail with NoMoreCards, not RoundCompleted.
     env.ledger().set_timestamp(NOW + 65);
-    let err = client.try_next_card(&owner, &round_id).unwrap_err().unwrap();
+    let err = client
+        .try_next_card(&owner, &round_id)
+        .unwrap_err()
+        .unwrap();
     assert_eq!(
         err,
         crate::Error::NoMoreCards.into(),
@@ -2655,7 +2676,13 @@ fn create_round_filter_selects_decade_genre_and_difficulty_and_multiplies_points
         &owner,
         &Card {
             difficulty: 3,
-            ..sample_card(&env, Genre::RnB, "TwoThousands Artist", "TwoThousands Track", 2000)
+            ..sample_card(
+                &env,
+                Genre::RnB,
+                "TwoThousands Artist",
+                "TwoThousands Track",
+                2000,
+            )
         },
     );
     client.add_card(
@@ -2665,7 +2692,10 @@ fn create_round_filter_selects_decade_genre_and_difficulty_and_multiplies_points
             ..sample_card(&env, Genre::Pop, "Pop Artist", "Pop Track", 1995)
         },
     );
-    client.add_card(&owner, &sample_card(&env, Genre::RnB, "Medium Artist", "Medium Track", 1995));
+    client.add_card(
+        &owner,
+        &sample_card(&env, Genre::RnB, "Medium Artist", "Medium Track", 1995),
+    );
     client.set_cards_per_round(&owner, &2);
 
     let round_id = client.create_round_with_filter(
@@ -2823,11 +2853,7 @@ fn simulate_eight_player_round(scenario: Simulation) {
         }
         Simulation::Abandoned => {
             env.ledger().set_timestamp(NOW + 11);
-            assert!(client.submit_answer(
-                &owner,
-                &round_id,
-                &Answer::Title(card.title.clone())
-            ));
+            assert!(client.submit_answer(&owner, &round_id, &Answer::Title(card.title.clone())));
             env.ledger()
                 .set_timestamp(client.get_round(&round_id).end_time + 1);
             client.finalize_round(&players[1], &round_id);
@@ -2850,14 +2876,7 @@ fn simulate_eight_player_round(scenario: Simulation) {
         Simulation::AllWrong => {}
     }
     let events = env.events().all();
-    assert_round_completed_event(
-        &env,
-        &events,
-        &client.address,
-        round_id,
-        &winners,
-        &scores,
-    );
+    assert_round_completed_event(&env, &events, &client.address, round_id, &winners, &scores);
 
     for player in players.iter() {
         let stats = client.get_player_stat(player);
@@ -2887,7 +2906,10 @@ fn lf159_first_ledger_answer_gets_max_points() {
     env.ledger().set_timestamp(NOW + 6);
     assert!(client.submit_answer(&owner, &round_id, &Answer::Title(card.title.clone())));
 
-    assert_eq!(client.get_round_scores(&round_id).get(owner.clone()), Some(100));
+    assert_eq!(
+        client.get_round_scores(&round_id).get(owner.clone()),
+        Some(100)
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -2987,11 +3009,7 @@ fn seeded_card_removals_preserve_genre_indexes() {
     let (env, client, owner) = setup();
     let mut cards = std::vec::Vec::new();
     for i in 0..20u64 {
-        let genre = if i % 2 == 0 {
-            Genre::Pop
-        } else {
-            Genre::Rock
-        };
+        let genre = if i % 2 == 0 { Genre::Pop } else { Genre::Rock };
         let id = client.add_card(
             &owner,
             &sample_card(
@@ -3030,13 +3048,33 @@ fn lf161_rejects_leading_or_trailing_whitespace() {
     let (env, client, owner) = setup();
     let base = sample_card(&env, Genre::Pop, "Artist", "Title", 2000);
     let cases = [
-        (String::from_str(&env, " Title"), base.artist.clone(), Error::InvalidCardTitle),
-        (String::from_str(&env, "Title "), base.artist.clone(), Error::InvalidCardTitle),
-        (base.title.clone(), String::from_str(&env, " Artist"), Error::InvalidCardArtist),
-        (base.title.clone(), String::from_str(&env, "Artist "), Error::InvalidCardArtist),
+        (
+            String::from_str(&env, " Title"),
+            base.artist.clone(),
+            Error::InvalidCardTitle,
+        ),
+        (
+            String::from_str(&env, "Title "),
+            base.artist.clone(),
+            Error::InvalidCardTitle,
+        ),
+        (
+            base.title.clone(),
+            String::from_str(&env, " Artist"),
+            Error::InvalidCardArtist,
+        ),
+        (
+            base.title.clone(),
+            String::from_str(&env, "Artist "),
+            Error::InvalidCardArtist,
+        ),
     ];
     for (title, artist, err) in cases {
-        let card = Card { title, artist, ..base.clone() };
+        let card = Card {
+            title,
+            artist,
+            ..base.clone()
+        };
         assert_eq!(client.try_add_card(&owner, &card), Err(Ok(err.into())));
     }
     assert_eq!(client.get_cards_count(), 0);
@@ -3049,11 +3087,23 @@ fn lf161_rejects_control_characters() {
     let title_with_tab = String::from_str(&env, "Ti\ttle");
     let artist_with_nl = String::from_str(&env, "Art\nist");
     assert_eq!(
-        client.try_add_card(&owner, &Card { title: title_with_tab, ..base.clone() }),
+        client.try_add_card(
+            &owner,
+            &Card {
+                title: title_with_tab,
+                ..base.clone()
+            }
+        ),
         Err(Ok(Error::InvalidCardTitle.into()))
     );
     assert_eq!(
-        client.try_add_card(&owner, &Card { artist: artist_with_nl, ..base.clone() }),
+        client.try_add_card(
+            &owner,
+            &Card {
+                artist: artist_with_nl,
+                ..base.clone()
+            }
+        ),
         Err(Ok(Error::InvalidCardArtist.into()))
     );
 }
@@ -3075,15 +3125,30 @@ fn parse_all_year_options(q: &crate::QuestionCard) -> std::vec::Vec<u64> {
 fn lf160_current_year_card_options_are_within_bounds() {
     let (env, client, owner) = setup();
     let current_year = 1970 + env.ledger().timestamp() / 31_556_952;
-    client.add_card(&owner, &sample_card(&env, Genre::Pop, "A", "T", current_year));
-    client.add_card(&owner, &sample_card(&env, Genre::Pop, "B", "T2", current_year - 1));
-    client.add_card(&owner, &sample_card(&env, Genre::Pop, "C", "T3", current_year - 2));
-    client.add_card(&owner, &sample_card(&env, Genre::Pop, "D", "T4", current_year - 3));
+    client.add_card(
+        &owner,
+        &sample_card(&env, Genre::Pop, "A", "T", current_year),
+    );
+    client.add_card(
+        &owner,
+        &sample_card(&env, Genre::Pop, "B", "T2", current_year - 1),
+    );
+    client.add_card(
+        &owner,
+        &sample_card(&env, Genre::Pop, "C", "T3", current_year - 2),
+    );
+    client.add_card(
+        &owner,
+        &sample_card(&env, Genre::Pop, "D", "T4", current_year - 3),
+    );
 
     let card = client.get_card(&owner, &1);
     let q = client.build_question_card(&card, &7u64, &QuestionKind::Year);
     for year in parse_all_year_options(&q).iter() {
-        assert!(*year >= 1900 && *year <= current_year, "option {year} outside [1900, {current_year}]");
+        assert!(
+            *year >= 1900 && *year <= current_year,
+            "option {year} outside [1900, {current_year}]"
+        );
     }
 }
 
@@ -3119,7 +3184,7 @@ fn lf160_edge_year_card_still_has_four_unique_options() {
         q.option_four.clone(),
     ];
     for i in 0..4 {
-        for j in (i+1)..4 {
+        for j in (i + 1)..4 {
             assert_ne!(opts[i], opts[j], "duplicate option at {i},{j}");
         }
     }

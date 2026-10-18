@@ -245,7 +245,9 @@ impl LyricsFlipNFT {
         env.storage().instance().set(&DataKey::TokenSymbol, &symbol);
         env.storage().instance().set(&DataKey::BaseUri, &base_uri);
         env.storage().instance().set(&DataKey::TokenCount, &0u128);
-        env.storage().instance().set(&DataKey::SchemaVersion, &VERSION);
+        env.storage()
+            .instance()
+            .set(&DataKey::SchemaVersion, &VERSION);
         bump_instance(&env);
     }
 
@@ -343,11 +345,7 @@ impl LyricsFlipNFT {
     /// Returns the number of tokens owned by `owner`.
     pub fn balance(env: Env, owner: Address) -> i128 {
         let key = DataKey::Balance(owner);
-        let balance = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or(0);
+        let balance = env.storage().persistent().get(&key).unwrap_or(0);
         if env.storage().persistent().has(&key) {
             bump_persistent(&env, &key);
         }
@@ -388,7 +386,6 @@ impl LyricsFlipNFT {
         panic_with_error!(_env, Error::NonTransferable);
     }
 
-
     /// Burns `token_id` owned by `owner`. The caller must authenticate as `owner`.
     pub fn burn(env: Env, owner: Address, token_id: u128) {
         owner.require_auth();
@@ -427,7 +424,12 @@ impl LyricsFlipNFT {
     }
 
     /// Always panics with `NonTransferable` (LF-169).
-    pub fn approve_for_all(_env: Env, _owner: Address, _operator: Address, _live_until_ledger: u32) {
+    pub fn approve_for_all(
+        _env: Env,
+        _owner: Address,
+        _operator: Address,
+        _live_until_ledger: u32,
+    ) {
         panic_with_error!(_env, Error::NonTransferable);
     }
 
@@ -451,10 +453,7 @@ impl LyricsFlipNFT {
     /// Returns the token collection symbol.
     pub fn symbol(env: Env) -> String {
         bump_instance(&env);
-        env.storage()
-            .instance()
-            .get(&DataKey::TokenSymbol)
-            .unwrap()
+        env.storage().instance().get(&DataKey::TokenSymbol).unwrap()
     }
 
     /// Executes base uri.
@@ -575,7 +574,10 @@ impl LyricsFlipNFT {
 
     /// Returns the stored schema version (LF-157).
     pub fn schema_version(env: Env) -> u32 {
-        env.storage().instance().get(&DataKey::SchemaVersion).unwrap_or(1)
+        env.storage()
+            .instance()
+            .get(&DataKey::SchemaVersion)
+            .unwrap_or(1)
     }
 
     /// Returns whether the contract is paused.
@@ -642,7 +644,8 @@ impl LyricsFlipNFT {
     /// Emits `ContractUpgraded` event (LF-157).
     pub fn upgrade(env: Env, caller: Address, new_wasm_hash: BytesN<32>) {
         Self::assert_owner(&env, &caller);
-        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
         ContractUpgraded { new_wasm_hash }.publish(&env);
     }
 
@@ -670,7 +673,9 @@ impl LyricsFlipNFT {
                 _ => break,
             }
         }
-        env.storage().instance().set(&DataKey::SchemaVersion, &VERSION);
+        env.storage()
+            .instance()
+            .set(&DataKey::SchemaVersion, &VERSION);
         bump_instance(&env);
         ContractMigrated {
             old_version: current_version,
@@ -815,25 +820,20 @@ impl LyricsFlipNFT {
         let count = Self::owner_token_count(env, owner);
         let pos = count;
 
-        env.storage().persistent().set(
-            &DataKey::OwnerTokenAt((owner.clone(), pos)),
-            &token_id,
-        );
+        env.storage()
+            .persistent()
+            .set(&DataKey::OwnerTokenAt((owner.clone(), pos)), &token_id);
         bump_persistent(env, &DataKey::OwnerTokenAt((owner.clone(), pos)));
 
         env.storage().persistent().set(
             &DataKey::OwnerTokenPosition((owner.clone(), token_id)),
             &pos,
         );
-        bump_persistent(
-            env,
-            &DataKey::OwnerTokenPosition((owner.clone(), token_id)),
-        );
+        bump_persistent(env, &DataKey::OwnerTokenPosition((owner.clone(), token_id)));
 
-        env.storage().persistent().set(
-            &DataKey::OwnerTokenCount(owner.clone()),
-            &(count + 1),
-        );
+        env.storage()
+            .persistent()
+            .set(&DataKey::OwnerTokenCount(owner.clone()), &(count + 1));
         bump_persistent(env, &DataKey::OwnerTokenCount(owner.clone()));
     }
 
@@ -857,10 +857,9 @@ impl LyricsFlipNFT {
             let last_key = DataKey::OwnerTokenAt((owner.clone(), last_index));
             let last_token_id: u128 = env.storage().persistent().get(&last_key).unwrap();
 
-            env.storage().persistent().set(
-                &DataKey::OwnerTokenAt((owner.clone(), pos)),
-                &last_token_id,
-            );
+            env.storage()
+                .persistent()
+                .set(&DataKey::OwnerTokenAt((owner.clone(), pos)), &last_token_id);
             bump_persistent(env, &DataKey::OwnerTokenAt((owner.clone(), pos)));
 
             env.storage().persistent().set(
@@ -878,10 +877,9 @@ impl LyricsFlipNFT {
             .persistent()
             .remove(&DataKey::OwnerTokenAt((owner.clone(), last_index)));
         env.storage().persistent().remove(&pos_key);
-        env.storage().persistent().set(
-            &DataKey::OwnerTokenCount(owner.clone()),
-            &last_index,
-        );
+        env.storage()
+            .persistent()
+            .set(&DataKey::OwnerTokenCount(owner.clone()), &last_index);
         bump_persistent(env, &DataKey::OwnerTokenCount(owner.clone()));
     }
 }
