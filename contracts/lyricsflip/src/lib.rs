@@ -27,7 +27,7 @@ pub use types::{
 
 use soroban_sdk::{
     contract, contractclient, contractimpl, panic_with_error, Address, Bytes, BytesN, Env, Map,
-    String, TryFromVal, Val, Vec,
+    String, Symbol, TryFromVal, Val, Vec,
 };
 
 /// Bumped on every release that changes the contract's code; see `upgrade`.
@@ -442,18 +442,13 @@ impl LyricsFlip {
             .persistent()
             .get(&DataKey::Card(card_id))
             .unwrap_or_else(|| panic_with_error!(env, Error::NonExistingCard));
-        let card = match Card::try_from_val(env, &stored) {
-            Ok(card) => card,
-            Err(_) => {
-                let legacy = LegacyCard::try_from_val(env, &stored)
-                    .unwrap_or_else(|_| panic_with_error!(env, Error::NonExistingCard));
-                let card = Card::from(legacy);
-                env.storage()
-                    .persistent()
-                    .set(&DataKey::Card(card_id), &card);
-                card
-            }
-        };
+        let (card, is_legacy) = decode_stored_card(env, &stored)
+            .unwrap_or_else(|_| panic_with_error!(env, Error::NonExistingCard));
+        if is_legacy {
+            env.storage()
+                .persistent()
+                .set(&DataKey::Card(card_id), &card);
+        }
         bump_persistent(env, &DataKey::Card(card_id));
         card
     }
@@ -978,14 +973,15 @@ impl LyricsFlip {
             .persistent()
             .get(&DataKey::PlayerCardIndex((round_id, caller.clone())))
             .unwrap_or(0);
+        let round_index = round.next_card_index;
         let card_id = round_cards
-            .get(player_index)
+            .get(round_index)
             .unwrap_or_else(|| panic_with_error!(env, Error::NoMoreCards));
         let card = Self::read_card(&env, card_id);
 
         CardDrawn {
             round_id,
-            index: player_index,
+            index: round_index,
             card_id,
         }
         .publish(&env);
@@ -1005,6 +1001,8 @@ impl LyricsFlip {
         // Do NOT set is_completed here. The round is completed only by
         // finalize_round, which lets players answer the last card after it
         // has been drawn (LF-003).
+        let mut round = round;
+        round.next_card_index = round_index + 1;
         env.storage()
             .persistent()
             .set(&DataKey::Round(round_id), &round);
@@ -1267,16 +1265,11 @@ impl LyricsFlip {
         // set only by finalize_round (which is guarded by RoundAlreadyFinalized
         // above). The old `round.is_completed` check fired as soon as the last
         // card was drawn, preventing players from ever answering it.
-        let player_index: u32 = env
-            .storage()
-            .persistent()
-            .get(&DataKey::PlayerCardIndex((round_id, caller.clone())))
-            .unwrap_or(0);
-        if player_index == 0 {
+        if round.next_card_index == 0 {
             panic_with_error!(env, Error::NoActiveCard);
         }
 
-        let current_index = player_index - 1;
+        let current_index = round.next_card_index - 1;
         let round_cards = Self::read_round_cards(&env, round_id);
         let current_card_id = round_cards.get(current_index).unwrap();
         let current_card = Self::read_card(&env, current_card_id);
@@ -1306,7 +1299,16 @@ impl LyricsFlip {
                 caller.clone(),
                 current_card_id,
             )))
-            .unwrap_or(round.start_time);
+            .unwrap_or_else(|| {
+                env.storage()
+                    .persistent()
+                    .get(&DataKey::PlayerCardStartedAt((
+                        round_id,
+                        round.admin.clone(),
+                        current_card_id,
+                    )))
+                    .unwrap_or(round.start_time)
+            });
         let answer_time = env.ledger().timestamp().saturating_sub(answer_started_at);
         let answer_times = Self::read_round_answer_times(&env, round_id);
         let mut answer_times = answer_times;
@@ -1567,21 +1569,23 @@ impl LyricsFlip {
         let genre_index = Index::Genre(card.genre);
         let genre_len = Self::index_len(env, &genre_index) as u64;
 
+        let genre_sample = core::cmp::min(genre_len, MAX_DISTRACTOR_SAMPLE);
+        let genre_positions = Self::get_random_numbers(env, seed, genre_sample, genre_len, true);
         let mut genre_ids: Vec<u64> = Vec::new(env);
-        for i in 0..genre_len {
-            genre_ids.push_back(Self::index_get(env, &genre_index, i as u32));
+        for position in genre_positions.iter() {
+            genre_ids.push_back(Self::index_get(env, &genre_index, position as u32));
         }
 
         let mut candidates: Vec<u64> = Vec::new(env);
 
         if genre_len > 0 {
-            let indices = Self::get_random_numbers(env, seed, genre_len, genre_len, true);
-            for idx in indices.iter() {
-                candidates.push_back(genre_ids.get(idx as u32).unwrap());
+            for id in genre_ids.iter() {
+                candidates.push_back(id);
             }
         }
 
-        let shuffled_all = Self::get_random_numbers(env, seed + 1, cards_count, cards_count, false);
+        let all_sample = core::cmp::min(cards_count, MAX_DISTRACTOR_SAMPLE);
+        let shuffled_all = Self::get_random_numbers(env, seed + 1, all_sample, cards_count, false);
         for id in shuffled_all.iter() {
             if !genre_ids.contains(id) {
                 candidates.push_back(id);
@@ -1881,17 +1885,13 @@ impl LyricsFlip {
     fn are_all_required_answers_submitted(env: &Env, round_id: u64) -> bool {
         let players = Self::read_round_players(env, round_id);
         let round_cards = Self::read_round_cards(env, round_id);
-        if players.is_empty() || round_cards.is_empty() {
+        let round = Self::read_round(env, round_id);
+        if players.is_empty() || round_cards.is_empty() || round.next_card_index == 0 {
             return false;
         }
 
         for player in players.iter() {
-            let player_index: u32 = env
-                .storage()
-                .persistent()
-                .get(&DataKey::PlayerCardIndex((round_id, player.clone())))
-                .unwrap_or(0);
-            for card_id in round_cards.iter().take(player_index as usize) {
+            for card_id in round_cards.iter().take(round.next_card_index as usize) {
                 let answered: bool = env
                     .storage()
                     .persistent()
@@ -2162,4 +2162,26 @@ impl LyricsFlip {
         }
         result
     }
+}
+
+fn decode_stored_card(env: &Env, stored: &Val) -> Result<(Card, bool), ()> {
+    let values: Map<Symbol, Val> = Map::try_from_val(env, stored).map_err(|_| ())?;
+    let get = |name: &str| values.get(Symbol::new(env, name)).ok_or(());
+    let difficulty = values.get(Symbol::new(env, "difficulty"));
+    Ok((
+        Card {
+            card_id: u64::try_from_val(env, &get("card_id")?).map_err(|_| ())?,
+            genre: Genre::try_from_val(env, &get("genre")?).map_err(|_| ())?,
+            artist: String::try_from_val(env, &get("artist")?).map_err(|_| ())?,
+            title: String::try_from_val(env, &get("title")?).map_err(|_| ())?,
+            year: u64::try_from_val(env, &get("year")?).map_err(|_| ())?,
+            difficulty: difficulty
+                .as_ref()
+                .map(|value| u32::try_from_val(env, value).map_err(|_| ()))
+                .transpose()?
+                .unwrap_or(2),
+            lyrics: String::try_from_val(env, &get("lyrics")?).map_err(|_| ())?,
+        },
+        difficulty.is_none(),
+    ))
 }

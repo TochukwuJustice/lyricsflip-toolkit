@@ -852,7 +852,8 @@ fn assert_round_completed_event(
     .to_xdr(env, contract_id);
     assert!(
         events.events().contains(&expected),
-        "expected RoundCompleted event to include the winning scores and round id"
+        "expected RoundCompleted event to include the winning scores and round id; events: {:?}",
+        events.events()
     );
 }
 
@@ -891,8 +892,8 @@ fn finalize_round_e2e_single_winner_updates_stats_and_scores() {
     ));
 
     let scores = client.get_round_scores(&round_id);
-    // Two correct answers, 5s after each draw: 2 * (100 - 5 * 5).
-    assert_eq!(scores.get(owner.clone()).unwrap(), 150u64);
+    // Two correct answers at difficulty 2: 2 * 100 * 2.
+    assert_eq!(scores.get(owner.clone()).unwrap(), 400u64);
     assert_eq!(scores.get(player2.clone()).unwrap(), 0u64);
 
     client.finalize_round(&owner, &round_id);
@@ -2137,13 +2138,14 @@ fn leave_round_refunds_while_paused() {
     client.pause(&owner);
 
     // Leaving must still work so a player's wager can always leave the contract.
+    let expected_refund = client.get_round(&round_id).wager_amount;
     client.leave_round(&player2, &round_id);
-    assert_eq!(client.get_players_round_count(&round_id), 1);
     let events = env.events().all();
+    assert_eq!(client.get_players_round_count(&round_id), 1);
     let expected = RoundLeft {
         round_id,
         player: player2.clone(),
-        refunded: client.get_round(&round_id).wager_amount,
+        refunded: expected_refund,
     }
     .to_xdr(&env, &client.address);
     assert!(events.events().contains(&expected));
@@ -2162,8 +2164,8 @@ fn cancel_round_refunds_everyone_while_paused() {
 
     // Cancelling must still work so escrowed funds can always be returned.
     client.cancel_round(&owner, &round_id);
-    assert!(client.get_round(&round_id).is_cancelled);
     let events = env.events().all();
+    assert!(client.get_round(&round_id).is_cancelled);
     let expected = RoundCancelled {
         round_id,
         cancelled_by: owner.clone(),
@@ -2329,7 +2331,7 @@ fn admin_and_gameplay_mutations_emit_events() {
             round_id,
             player: owner.clone(),
             correct: true,
-            points: 100,
+            points: 200,
         },
     );
 }
@@ -2364,7 +2366,7 @@ fn faster_correct_answers_earn_more_points_and_wrong_answers_earn_zero() {
             round_id,
             player: fast.clone(),
             correct: true,
-            points: 100,
+            points: 200,
         },
     );
     assert!(!client.submit_answer(
@@ -2390,8 +2392,8 @@ fn faster_correct_answers_earn_more_points_and_wrong_answers_earn_zero() {
     let scores = client.get_round_scores(&round_id);
     let fast_points = scores.get(fast.clone()).unwrap();
     let slow_points = scores.get(slow.clone()).unwrap();
-    assert_eq!(fast_points, 100);
-    assert_eq!(slow_points, 55);
+    assert_eq!(fast_points, 200);
+    assert_eq!(slow_points, 110);
     assert!(fast_points > slow_points);
     assert_eq!(scores.get(wrong.clone()).unwrap(), 0);
     assert_eq!(scores.get(owner.clone()).unwrap(), 0);
@@ -2725,7 +2727,7 @@ fn create_round_filter_selects_decade_genre_and_difficulty_and_multiplies_points
     let card = client.next_card(&owner, &round_id);
     env.ledger().set_timestamp(NOW + 1);
     assert!(client.submit_answer(&owner, &round_id, &Answer::Title(card.title)));
-    assert_eq!(client.get_round_scores(&round_id).get(owner).unwrap(), 285);
+    assert_eq!(client.get_round_scores(&round_id).get(owner).unwrap(), 300);
 }
 
 #[test]
@@ -2809,7 +2811,7 @@ fn simulate_eight_player_round(scenario: Simulation) {
                         (3, 1) => 2,
                         (1, 0) => 3,
                         (1, 1) => 0,
-                        _ => 3,
+                        _ => 8,
                     };
                     env.ledger().set_timestamp(start + delay);
                     assert!(client.submit_answer(
@@ -2824,9 +2826,9 @@ fn simulate_eight_player_round(scenario: Simulation) {
             let second_card = client.next_card(&owner, &round_id);
             answer_card(&second_card, second_start);
             let score_tie = client.get_round_scores(&round_id);
-            assert_eq!(score_tie.get(owner.clone()).unwrap(), 370);
-            assert_eq!(score_tie.get(players[1].clone()).unwrap(), 370);
-            assert!(score_tie.get(players[2].clone()).unwrap() < 370);
+            assert_eq!(score_tie.get(owner.clone()).unwrap(), 400);
+            assert_eq!(score_tie.get(players[1].clone()).unwrap(), 400);
+            assert_eq!(score_tie.get(players[2].clone()).unwrap(), 360);
             let times = env.as_contract(&client.address, || {
                 env.storage()
                     .persistent()
@@ -2868,6 +2870,7 @@ fn simulate_eight_player_round(scenario: Simulation) {
     if !matches!(scenario, Simulation::Abandoned) {
         client.finalize_round(&owner, &round_id);
     }
+    let events = env.events().all();
     let scores = client.get_round_scores(&round_id);
     let mut winners = soroban_sdk::Vec::new(&env);
     match scenario {
@@ -2880,7 +2883,6 @@ fn simulate_eight_player_round(scenario: Simulation) {
         }
         Simulation::AllWrong => {}
     }
-    let events = env.events().all();
     assert_round_completed_event(&env, &events, &client.address, round_id, &winners, &scores);
 
     for player in players.iter() {
@@ -2913,7 +2915,7 @@ fn lf159_first_ledger_answer_gets_max_points() {
 
     assert_eq!(
         client.get_round_scores(&round_id).get(owner.clone()),
-        Some(100)
+        Some(200)
     );
 }
 

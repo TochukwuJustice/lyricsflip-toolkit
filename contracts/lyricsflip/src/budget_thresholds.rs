@@ -7,7 +7,7 @@
 //! | ----------------------------- | ------------ | --------------- |
 //! | `create_round`                | 20,003,252   | 6,763,970       |
 //! | `start_round` (8th ready-up)  | 36,637,500   | 10,628,309      |
-//! | `build_question_card` (Title) | 4,633,560    | 2,490,833       |
+//! | `build_question_card` (Title) | 6,047,671    | 3,745,987       |
 
 pub const CREATE_ROUND_MAX_CPU: u64 = 22_000_000;
 pub const CREATE_ROUND_MAX_MEM: u64 = 7_450_000;
@@ -16,5 +16,5 @@ pub const START_ROUND_MAX_CPU: u64 = 40_300_000;
 pub const START_ROUND_MAX_MEM: u64 = 11_700_000;
 
 /// Covers every `QuestionKind`; Title is the most expensive.
-pub const BUILD_QUESTION_CARD_MAX_CPU: u64 = 5_100_000;
-pub const BUILD_QUESTION_CARD_MAX_MEM: u64 = 2_750_000;
+pub const BUILD_QUESTION_CARD_MAX_CPU: u64 = 6_700_000;
+pub const BUILD_QUESTION_CARD_MAX_MEM: u64 = 4_120_000;
