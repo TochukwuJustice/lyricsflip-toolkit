@@ -19,7 +19,7 @@ use crate::{
 };
 use soroban_sdk::{
     testutils::{Address as _, ContractEvents, Events, Ledger},
-    xdr, Address, Env, Event, Map, String, Vec,
+    xdr, Address, Env, Event, IntoVal, Map, String, Vec,
 };
 
 /// 2026-05-28, so cards up to year 2026 pass validation.
@@ -1210,6 +1210,10 @@ fn error_codes_are_stable() {
         (Error::NoActiveCard, 38),
         (Error::AlreadyAnswered, 39),
         (Error::Paused, 40),
+        (Error::InvalidRoundDuration, 41),
+        (Error::InvalidAnswerWindow, 42),
+        (Error::InvalidLobbyTimeout, 43),
+        (Error::InvalidRoundBuffer, 44),
     ];
     for (variant, code) in expected {
         assert_eq!(variant as u32, code, "{:?} was renumbered", variant);
@@ -3196,4 +3200,241 @@ fn lf160_edge_year_card_still_has_four_unique_options() {
             assert_ne!(opts[i], opts[j], "duplicate option at {i},{j}");
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// LF-158 – Make round duration, answer window, and lobby timeout configurable
+// ---------------------------------------------------------------------------
+
+#[test]
+fn lf158_configure_values_without_upgrade() {
+    let (env, client, owner) = setup();
+    let other = Address::generate(&env);
+
+    // Initial default values
+    assert_eq!(client.get_card_answer_window(), 15);
+    assert_eq!(client.get_lobby_timeout(), 600);
+    assert_eq!(client.get_round_duration(), 300);
+    assert_eq!(client.get_round_buffer(), 5);
+
+    // Non-owner cannot configure
+    assert_eq!(
+        client.try_set_card_answer_window(&other, &20),
+        Err(Ok(Error::NotAuthorized.into()))
+    );
+    assert_eq!(
+        client.try_set_lobby_timeout(&other, &300),
+        Err(Ok(Error::NotAuthorized.into()))
+    );
+    assert_eq!(
+        client.try_set_round_duration(&other, &600),
+        Err(Ok(Error::NotAuthorized.into()))
+    );
+    assert_eq!(
+        client.try_set_round_buffer(&other, &10),
+        Err(Ok(Error::NotAuthorized.into()))
+    );
+
+    // Sane bounds validation
+    assert_eq!(
+        client.try_set_card_answer_window(&owner, &4),
+        Err(Ok(Error::InvalidAnswerWindow.into()))
+    );
+    assert_eq!(
+        client.try_set_card_answer_window(&owner, &121),
+        Err(Ok(Error::InvalidAnswerWindow.into()))
+    );
+    assert_eq!(
+        client.try_set_lobby_timeout(&owner, &59),
+        Err(Ok(Error::InvalidLobbyTimeout.into()))
+    );
+    assert_eq!(
+        client.try_set_lobby_timeout(&owner, &86401),
+        Err(Ok(Error::InvalidLobbyTimeout.into()))
+    );
+    assert_eq!(
+        client.try_set_round_duration(&owner, &59),
+        Err(Ok(Error::InvalidRoundDuration.into()))
+    );
+    assert_eq!(
+        client.try_set_round_duration(&owner, &86401),
+        Err(Ok(Error::InvalidRoundDuration.into()))
+    );
+    assert_eq!(
+        client.try_set_round_buffer(&owner, &0),
+        Err(Ok(Error::InvalidRoundBuffer.into()))
+    );
+    assert_eq!(
+        client.try_set_round_buffer(&owner, &61),
+        Err(Ok(Error::InvalidRoundBuffer.into()))
+    );
+
+    // Successful configuration without upgrade
+    client.set_card_answer_window(&owner, &30);
+    assert_eq!(client.get_card_answer_window(), 30);
+
+    client.set_lobby_timeout(&owner, &1200);
+    assert_eq!(client.get_lobby_timeout(), 1200);
+
+    client.set_round_duration(&owner, &500);
+    assert_eq!(client.get_round_duration(), 500);
+
+    client.set_round_buffer(&owner, &8);
+    assert_eq!(client.get_round_buffer(), 8);
+
+    // Reset round_duration back to 300
+    client.set_round_duration(&owner, &300);
+    assert_eq!(client.get_round_duration(), 300);
+}
+
+#[test]
+fn lf158_round_snapshots_configuration() {
+    let (env, client, owner) = setup();
+    seed_cards(&env, &client, &owner, 10);
+    client.set_cards_per_round(&owner, &4);
+
+    // Set custom global config
+    client.set_card_answer_window(&owner, &25);
+    client.set_lobby_timeout(&owner, &1800);
+    client.set_round_buffer(&owner, &10);
+    client.set_round_duration(&owner, &450);
+
+    // Create round: snapshots 25s answer window, 1800s lobby timeout, 450s duration
+    let round_id = client.create_round(&owner, &Some(Genre::Pop), &12345u64);
+    let round = client.get_round(&round_id);
+    assert_eq!(round.answer_window, 25);
+    assert_eq!(round.lobby_timeout, 1800);
+    assert_eq!(round.duration, 450);
+
+    // Subsequent changes to global configuration do NOT affect the created round
+    client.set_card_answer_window(&owner, &10);
+    client.set_lobby_timeout(&owner, &600);
+    client.set_round_buffer(&owner, &2);
+    client.set_round_duration(&owner, &300);
+
+    let round_after = client.get_round(&round_id);
+    assert_eq!(round_after.answer_window, 25);
+    assert_eq!(round_after.lobby_timeout, 1800);
+    assert_eq!(round_after.duration, 450);
+
+    // Start round and verify end_time matches snapshotted duration
+    let start_timestamp = 2_000_000;
+    env.ledger().set_timestamp(start_timestamp);
+    client.start_round(&owner, &round_id);
+
+    let started_round = client.get_round(&round_id);
+    assert_eq!(started_round.start_time, start_timestamp);
+    assert_eq!(started_round.end_time, start_timestamp + 450);
+
+    // Player answers at 20 seconds: > 10s (new global config) but <= 25s (snapshotted), so it succeeds
+    let card = client.next_card(&owner, &round_id);
+    env.ledger().set_timestamp(start_timestamp + 20);
+    let correct = client.submit_answer(&owner, &round_id, &Answer::Title(card.title));
+    assert!(correct);
+}
+
+#[test]
+fn lf158_legacy_round_decodes_with_default_timing_values() {
+    let (env, client, owner) = setup();
+    seed_cards(&env, &client, &owner, 3);
+    let round_id = client.create_round(&owner, &Some(Genre::Pop), &73u64);
+
+    // Store the pre-LF-158 Round shape, which has no timing configuration fields.
+    let mut legacy: Map<soroban_sdk::Symbol, soroban_sdk::Val> = Map::new(&env);
+    legacy.set(
+        soroban_sdk::Symbol::new(&env, "round_id"),
+        round_id.into_val(&env),
+    );
+    legacy.set(
+        soroban_sdk::Symbol::new(&env, "admin"),
+        owner.clone().into_val(&env),
+    );
+    legacy.set(
+        soroban_sdk::Symbol::new(&env, "genre"),
+        Genre::Pop.into_val(&env),
+    );
+    legacy.set(
+        soroban_sdk::Symbol::new(&env, "wager_amount"),
+        0i128.into_val(&env),
+    );
+    legacy.set(
+        soroban_sdk::Symbol::new(&env, "start_time"),
+        0u64.into_val(&env),
+    );
+    legacy.set(
+        soroban_sdk::Symbol::new(&env, "is_started"),
+        false.into_val(&env),
+    );
+    legacy.set(
+        soroban_sdk::Symbol::new(&env, "is_completed"),
+        false.into_val(&env),
+    );
+    legacy.set(
+        soroban_sdk::Symbol::new(&env, "end_time"),
+        0u64.into_val(&env),
+    );
+    legacy.set(
+        soroban_sdk::Symbol::new(&env, "next_card_index"),
+        0u32.into_val(&env),
+    );
+    legacy.set(
+        soroban_sdk::Symbol::new(&env, "is_cancelled"),
+        false.into_val(&env),
+    );
+    env.as_contract(&client.address, || {
+        env.storage()
+            .persistent()
+            .set(&crate::DataKey::Round(round_id), &legacy);
+    });
+
+    let decoded = client.get_round(&round_id);
+    assert_eq!(decoded.round_id, round_id);
+    assert_eq!(decoded.admin, owner);
+    assert_eq!(decoded.answer_window, 15);
+    assert_eq!(decoded.lobby_timeout, 600);
+    assert_eq!(decoded.duration, 300);
+}
+
+#[test]
+fn lf158_twenty_card_round_has_enough_time_to_finish() {
+    let (env, client, owner) = setup();
+    // Seed 25 cards
+    seed_cards(&env, &client, &owner, 25);
+    client.set_cards_per_round(&owner, &20);
+
+    // Default configuration: answer_window = 15s, buffer = 5s
+    // Default deadline for 20 cards = 20 * (15 + 5) = 400s
+    let round_id = client.create_round(&owner, &Some(Genre::Pop), &999u64);
+    let round = client.get_round(&round_id);
+    assert_eq!(round.duration, 400);
+
+    let start_time = 1_000_000;
+    env.ledger().set_timestamp(start_time);
+    client.start_round(&owner, &round_id);
+    assert_eq!(client.get_round(&round_id).end_time, start_time + 400);
+
+    // Simulate 20 cards where each takes 15s answering + 2s block/transaction latency = 17s
+    // Total elapsed time = 20 * 17 = 340s.
+    // Under the old 300s deadline, this would fail at card 18 (elapsed 306s) with Error::RoundCompleted.
+    // Under dynamic scaling (400s), all 20 cards finish comfortably!
+    let mut current_time = start_time;
+    for _ in 0..20 {
+        let card = client.next_card(&owner, &round_id);
+        current_time += 15;
+        env.ledger().set_timestamp(current_time);
+        assert!(client.submit_answer(&owner, &round_id, &Answer::Title(card.title)));
+        current_time += 2;
+        env.ledger().set_timestamp(current_time);
+    }
+
+    assert_eq!(current_time - start_time, 340);
+    assert!(current_time < client.get_round(&round_id).end_time);
+
+    // Finalize the completed round
+    client.finalize_round(&owner, &round_id);
+    let completed_round = client.get_round(&round_id);
+    assert!(completed_round.is_completed);
+
+    let scores = client.get_round_scores(&round_id);
+    assert!(scores.get(owner).unwrap() > 0);
 }

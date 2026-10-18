@@ -185,3 +185,27 @@ pub struct ContractMigrated {
     pub old_version: u32,
     pub new_version: u32,
 }
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CardAnswerWindowUpdated {
+    pub value: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LobbyTimeoutUpdated {
+    pub value: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RoundDurationUpdated {
+    pub value: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RoundBufferUpdated {
+    pub value: u64,
+}

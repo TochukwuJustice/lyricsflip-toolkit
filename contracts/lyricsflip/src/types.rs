@@ -244,6 +244,12 @@ pub struct Round {
     pub end_time: u64,
     pub next_card_index: u32,
     pub is_cancelled: bool,
+    /// Snapshotted card answer window in seconds (LF-158).
+    pub answer_window: u64,
+    /// Snapshotted lobby timeout in seconds (LF-158).
+    pub lobby_timeout: u64,
+    /// Snapshotted round duration in seconds (LF-158).
+    pub duration: u64,
 }
 
 /// NFT reward milestones a player can claim once each via `claim_reward`.
@@ -366,4 +372,12 @@ pub enum DataKey {
     Paused,
     /// Stored storage schema version (LF-157).
     SchemaVersion,
+    /// Global card answer window in seconds (LF-158).
+    CardAnswerWindow,
+    /// Global lobby timeout in seconds (LF-158).
+    LobbyTimeout,
+    /// Global round duration override in seconds (LF-158). 0 = dynamic scaling.
+    RoundDuration,
+    /// Global per-card latency buffer in seconds for dynamic deadline calculation (LF-158).
+    RoundBuffer,
 }

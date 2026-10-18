@@ -89,4 +89,12 @@ pub enum Error {
     /// claims are blocked; refund and cancel paths stay open so funds can
     /// always leave the contract.
     Paused = 40,
+    /// Round duration is out of allowed bounds (LF-158).
+    InvalidRoundDuration = 41,
+    /// Card answer window is out of allowed bounds (LF-158).
+    InvalidAnswerWindow = 42,
+    /// Lobby timeout is out of allowed bounds (LF-158).
+    InvalidLobbyTimeout = 43,
+    /// Round buffer is out of allowed bounds (LF-158).
+    InvalidRoundBuffer = 44,
 }

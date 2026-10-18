@@ -15,10 +15,11 @@ mod test_budget;
 
 pub use errors::Error;
 pub use events::{
-    AnswerSubmitted, CardAdded, CardDrawn, CardRemoved, CardUpdated, CardsPerRoundUpdated,
-    ContractMigrated, ContractUpgraded, OwnershipTransferStarted, OwnershipTransferred, Paused,
-    PlayerReady, RewardClaimed, RoleUpdated, RoundCancelled, RoundCompleted, RoundCreated,
-    RoundJoined, RoundLeft, RoundStarted, Unpaused,
+    AnswerSubmitted, CardAdded, CardAnswerWindowUpdated, CardDrawn, CardRemoved, CardUpdated,
+    CardsPerRoundUpdated, ContractMigrated, ContractUpgraded, LobbyTimeoutUpdated,
+    OwnershipTransferStarted, OwnershipTransferred, Paused, PlayerReady, RewardClaimed,
+    RoleUpdated, RoundBufferUpdated, RoundCancelled, RoundCompleted, RoundCreated,
+    RoundDurationUpdated, RoundJoined, RoundLeft, RoundStarted, Unpaused,
 };
 pub use types::{
     Answer, Card, CardPos, DataKey, Genre, LegacyCard, Milestone, PlayerStats, QuestionCard,
@@ -33,7 +34,7 @@ use soroban_sdk::{
 /// Bumped on every release that changes the contract's code; see `upgrade`.
 pub const VERSION: u32 = 2;
 
-const DEFAULT_ROUND_DURATION_SECONDS: u64 = 300;
+pub const DEFAULT_ROUND_DURATION_SECONDS: u64 = 300;
 
 /// Default cap on players per round when the owner hasn't set `max_players`.
 pub const DEFAULT_MAX_PLAYERS: u32 = 8;
@@ -54,6 +55,17 @@ pub const MIN_CORRECT_POINTS: u64 = 10;
 /// Seconds after creation after which anyone may cancel a round that never
 /// started.
 pub const LOBBY_TIMEOUT_SECONDS: u64 = 600;
+
+/// Minimum and maximum bounds for configurable values (LF-158).
+pub const MIN_CARD_ANSWER_WINDOW_SECONDS: u64 = 5;
+pub const MAX_CARD_ANSWER_WINDOW_SECONDS: u64 = 120;
+pub const MIN_LOBBY_TIMEOUT_SECONDS: u64 = 60;
+pub const MAX_LOBBY_TIMEOUT_SECONDS: u64 = 86400;
+pub const MIN_ROUND_DURATION_SECONDS: u64 = 60;
+pub const MAX_ROUND_DURATION_SECONDS: u64 = 86400;
+pub const DEFAULT_ROUND_BUFFER_SECONDS: u64 = 5;
+pub const MIN_ROUND_BUFFER_SECONDS: u64 = 1;
+pub const MAX_ROUND_BUFFER_SECONDS: u64 = 60;
 
 /// The subset of the `lyricsflip-nft` interface the game contract calls.
 ///
@@ -435,6 +447,42 @@ impl LyricsFlip {
             .unwrap_or(0)
     }
 
+    /// Returns the configured card answer window in seconds, defaulting to `CARD_ANSWER_WINDOW_SECONDS` (LF-158).
+    pub fn get_card_answer_window(env: Env) -> u64 {
+        bump_instance(&env);
+        env.storage()
+            .instance()
+            .get(&DataKey::CardAnswerWindow)
+            .unwrap_or(CARD_ANSWER_WINDOW_SECONDS)
+    }
+
+    /// Returns the configured lobby timeout in seconds, defaulting to `LOBBY_TIMEOUT_SECONDS` (LF-158).
+    pub fn get_lobby_timeout(env: Env) -> u64 {
+        bump_instance(&env);
+        env.storage()
+            .instance()
+            .get(&DataKey::LobbyTimeout)
+            .unwrap_or(LOBBY_TIMEOUT_SECONDS)
+    }
+
+    /// Returns the configured round duration in seconds, defaulting to `DEFAULT_ROUND_DURATION_SECONDS` (LF-158).
+    pub fn get_round_duration(env: Env) -> u64 {
+        bump_instance(&env);
+        env.storage()
+            .instance()
+            .get(&DataKey::RoundDuration)
+            .unwrap_or(DEFAULT_ROUND_DURATION_SECONDS)
+    }
+
+    /// Returns the configured round buffer in seconds per card, defaulting to `DEFAULT_ROUND_BUFFER_SECONDS` (LF-158).
+    pub fn get_round_buffer(env: Env) -> u64 {
+        bump_instance(&env);
+        env.storage()
+            .instance()
+            .get(&DataKey::RoundBuffer)
+            .unwrap_or(DEFAULT_ROUND_BUFFER_SECONDS)
+    }
+
     /// Internal helper to read a card from storage, migrating legacy cards if needed.
     pub fn read_card(env: &Env, card_id: u64) -> Card {
         let stored: Val = env
@@ -691,6 +739,14 @@ impl LyricsFlip {
             .instance()
             .set(&DataKey::RoundCount, &round_id);
 
+        let answer_window = Self::get_card_answer_window((*env).clone());
+        let lobby_timeout = Self::get_lobby_timeout((*env).clone());
+        let round_duration = Self::get_round_duration((*env).clone());
+        let buffer = Self::get_round_buffer((*env).clone());
+        let cards_count = cards.len() as u64;
+        let scaled_deadline = cards_count.saturating_mul(answer_window.saturating_add(buffer));
+        let duration = round_duration.max(scaled_deadline);
+
         let round = Round {
             round_id,
             admin: caller.clone(),
@@ -702,6 +758,9 @@ impl LyricsFlip {
             end_time: 0,
             next_card_index: 0,
             is_cancelled: false,
+            answer_window,
+            lobby_timeout,
+            duration,
         };
 
         let mut players: Vec<Address> = Vec::new(env);
@@ -803,7 +862,12 @@ impl LyricsFlip {
 
             let start_time = env.ledger().timestamp();
             round.start_time = start_time;
-            round.end_time = start_time + DEFAULT_ROUND_DURATION_SECONDS;
+            let duration = if round.duration > 0 {
+                round.duration
+            } else {
+                DEFAULT_ROUND_DURATION_SECONDS
+            };
+            round.end_time = start_time + duration;
             round.is_started = true;
             env.storage()
                 .persistent()
@@ -913,7 +977,12 @@ impl LyricsFlip {
                 .persistent()
                 .get(&DataKey::RoundCreatedAt(round_id))
                 .unwrap_or(0);
-            if env.ledger().timestamp() < created_at + LOBBY_TIMEOUT_SECONDS {
+            let timeout = if round.lobby_timeout > 0 {
+                round.lobby_timeout
+            } else {
+                LOBBY_TIMEOUT_SECONDS
+            };
+            if env.ledger().timestamp() < created_at + timeout {
                 panic_with_error!(env, Error::NotAuthorized);
             }
         }
@@ -1321,7 +1390,12 @@ impl LyricsFlip {
 
         // Answers after the card window are scored as wrong (not rejected),
         // so the player still counts as having answered the card.
-        let is_answer_correct = answer_time <= CARD_ANSWER_WINDOW_SECONDS
+        let answer_window = if round.answer_window > 0 {
+            round.answer_window
+        } else {
+            CARD_ANSWER_WINDOW_SECONDS
+        };
+        let is_answer_correct = answer_time <= answer_window
             && match answer {
                 Answer::Artist(value) => value == current_card.artist,
                 Answer::Year(value) => value == current_card.year,
@@ -1384,6 +1458,58 @@ impl LyricsFlip {
             panic_with_error!(env, Error::InvalidMaxPlayers);
         }
         env.storage().instance().set(&DataKey::MaxPlayers, &value);
+    }
+
+    /// Sets the card answer window in seconds (owner-only) (LF-158).
+    pub fn set_card_answer_window(env: Env, caller: Address, value: u64) {
+        caller.require_auth();
+        Self::assert_owner(&env, &caller);
+        if !(MIN_CARD_ANSWER_WINDOW_SECONDS..=MAX_CARD_ANSWER_WINDOW_SECONDS).contains(&value) {
+            panic_with_error!(env, Error::InvalidAnswerWindow);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::CardAnswerWindow, &value);
+        bump_instance(&env);
+        CardAnswerWindowUpdated { value }.publish(&env);
+    }
+
+    /// Sets the lobby timeout in seconds (owner-only) (LF-158).
+    pub fn set_lobby_timeout(env: Env, caller: Address, value: u64) {
+        caller.require_auth();
+        Self::assert_owner(&env, &caller);
+        if !(MIN_LOBBY_TIMEOUT_SECONDS..=MAX_LOBBY_TIMEOUT_SECONDS).contains(&value) {
+            panic_with_error!(env, Error::InvalidLobbyTimeout);
+        }
+        env.storage().instance().set(&DataKey::LobbyTimeout, &value);
+        bump_instance(&env);
+        LobbyTimeoutUpdated { value }.publish(&env);
+    }
+
+    /// Sets the round duration in seconds (owner-only) (LF-158).
+    pub fn set_round_duration(env: Env, caller: Address, value: u64) {
+        caller.require_auth();
+        Self::assert_owner(&env, &caller);
+        if !(MIN_ROUND_DURATION_SECONDS..=MAX_ROUND_DURATION_SECONDS).contains(&value) {
+            panic_with_error!(env, Error::InvalidRoundDuration);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::RoundDuration, &value);
+        bump_instance(&env);
+        RoundDurationUpdated { value }.publish(&env);
+    }
+
+    /// Sets the round buffer in seconds per card (owner-only) (LF-158).
+    pub fn set_round_buffer(env: Env, caller: Address, value: u64) {
+        caller.require_auth();
+        Self::assert_owner(&env, &caller);
+        if !(MIN_ROUND_BUFFER_SECONDS..=MAX_ROUND_BUFFER_SECONDS).contains(&value) {
+            panic_with_error!(env, Error::InvalidRoundBuffer);
+        }
+        env.storage().instance().set(&DataKey::RoundBuffer, &value);
+        bump_instance(&env);
+        RoundBufferUpdated { value }.publish(&env);
     }
 
     /// Sets the nft contract.
@@ -1839,13 +1965,14 @@ impl LyricsFlip {
     }
 
     fn read_round(env: &Env, round_id: u64) -> Round {
-        let round: Round = env
+        let stored: Val = env
             .storage()
             .persistent()
             .get(&DataKey::Round(round_id))
             .unwrap_or_else(|| panic_with_error!(env, Error::NonExistingRound));
         bump_persistent(env, &DataKey::Round(round_id));
-        round
+        decode_stored_round(env, &stored)
+            .unwrap_or_else(|_| panic_with_error!(env, Error::NonExistingRound))
     }
 
     fn read_round_cards(env: &Env, round_id: u64) -> Vec<u64> {
@@ -2184,4 +2311,30 @@ fn decode_stored_card(env: &Env, stored: &Val) -> Result<(Card, bool), ()> {
         },
         difficulty.is_none(),
     ))
+}
+
+fn decode_stored_round(env: &Env, stored: &Val) -> Result<Round, ()> {
+    let values: Map<Symbol, Val> = Map::try_from_val(env, stored).map_err(|_| ())?;
+    let get = |name: &str| values.get(Symbol::new(env, name)).ok_or(());
+    let get_u64_default = |name: &str, default: u64| -> Result<u64, ()> {
+        match values.get(Symbol::new(env, name)) {
+            Some(v) => u64::try_from_val(env, &v).map_err(|_| ()),
+            None => Ok(default),
+        }
+    };
+    Ok(Round {
+        round_id: u64::try_from_val(env, &get("round_id")?).map_err(|_| ())?,
+        admin: Address::try_from_val(env, &get("admin")?).map_err(|_| ())?,
+        genre: Genre::try_from_val(env, &get("genre")?).map_err(|_| ())?,
+        wager_amount: i128::try_from_val(env, &get("wager_amount")?).map_err(|_| ())?,
+        start_time: u64::try_from_val(env, &get("start_time")?).map_err(|_| ())?,
+        is_started: bool::try_from_val(env, &get("is_started")?).map_err(|_| ())?,
+        is_completed: bool::try_from_val(env, &get("is_completed")?).map_err(|_| ())?,
+        end_time: u64::try_from_val(env, &get("end_time")?).map_err(|_| ())?,
+        next_card_index: u32::try_from_val(env, &get("next_card_index")?).map_err(|_| ())?,
+        is_cancelled: bool::try_from_val(env, &get("is_cancelled")?).map_err(|_| ())?,
+        answer_window: get_u64_default("answer_window", CARD_ANSWER_WINDOW_SECONDS)?,
+        lobby_timeout: get_u64_default("lobby_timeout", LOBBY_TIMEOUT_SECONDS)?,
+        duration: get_u64_default("duration", DEFAULT_ROUND_DURATION_SECONDS)?,
+    })
 }
